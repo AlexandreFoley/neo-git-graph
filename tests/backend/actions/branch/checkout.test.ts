@@ -1,5 +1,6 @@
 import * as cp from "node:child_process";
 import * as fs from "node:fs";
+import * as path from "node:path";
 
 import simpleGit from "simple-git";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -9,6 +10,7 @@ import { checkoutBranch } from "@/backend/actions/branch";
 import { git, makeRepo } from "../../helpers";
 
 let repo: string;
+let remoteRepo: string;
 
 function currentBranch(cwd: string): string {
   return cp.execFileSync("git", ["branch", "--show-current"], { cwd }).toString().trim();
@@ -17,10 +19,17 @@ function currentBranch(cwd: string): string {
 beforeAll(() => {
   repo = makeRepo();
   git(["branch", "other"], repo);
+
+  remoteRepo = makeRepo();
+  git(["remote", "add", "origin", remoteRepo], repo);
+  git(["fetch", "origin"], repo);
+  // Set up main to track origin/main so the pull test works as expected.
+  git(["branch", "--set-upstream-to=origin/main", "main"], repo);
 });
 
 afterAll(() => {
   fs.rmSync(repo, { recursive: true, force: true });
+  fs.rmSync(remoteRepo, { recursive: true, force: true });
 });
 
 describe("checkoutBranch", () => {
@@ -60,12 +69,63 @@ describe("checkoutBranch", () => {
     ).rejects.toThrow();
   });
 
-  it("throws when the new branch name already exists", async () => {
-    await expect(
-      checkoutBranch(simpleGit(repo), {
-        branchName: "other",
-        remoteBranch: "main"
-      })
-    ).rejects.toThrow();
+  it("switches to existing local branch when name conflict occurs", async () => {
+    await checkoutBranch(simpleGit(repo), {
+      branchName: "other",
+      remoteBranch: "main"
+    });
+    expect(currentBranch(repo)).toBe("other");
+
+    git(["checkout", "main"], repo);
+  });
+
+  it("does not pull when existing local branch does not track the given remote branch", async () => {
+    fs.writeFileSync(path.join(remoteRepo, "f"), "unrelated update");
+    git(["add", "."], remoteRepo);
+    git(["commit", "-m", "remote commit for unrelated branch test"], remoteRepo);
+    git(["fetch", "origin"], repo);
+
+    const commitBefore = cp
+      .execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo })
+      .toString()
+      .trim();
+
+    // "other" exists locally but does not track "origin/main"
+    await checkoutBranch(simpleGit(repo), {
+      branchName: "other",
+      remoteBranch: "origin/main"
+    });
+    expect(currentBranch(repo)).toBe("other");
+
+    const commitAfter = cp
+      .execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo })
+      .toString()
+      .trim();
+    expect(commitAfter).toBe(commitBefore);
+
+    git(["checkout", "main"], repo);
+  });
+
+  it("switches to existing local branch and pulls when name conflicts with a remote branch", async () => {
+    fs.writeFileSync(path.join(remoteRepo, "f"), "updated");
+    git(["add", "."], remoteRepo);
+    git(["commit", "-m", "remote commit"], remoteRepo);
+
+    const commitBefore = cp
+      .execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo })
+      .toString()
+      .trim();
+
+    await checkoutBranch(simpleGit(repo), {
+      branchName: "main",
+      remoteBranch: "origin/main"
+    });
+    expect(currentBranch(repo)).toBe("main");
+
+    const commitAfter = cp
+      .execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo })
+      .toString()
+      .trim();
+    expect(commitAfter).not.toBe(commitBefore);
   });
 });

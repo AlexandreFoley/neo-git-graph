@@ -30,6 +30,29 @@ export async function checkoutBranch(
   if (input.remoteBranch === null) {
     await git.checkout(input.branchName);
   } else {
-    await git.checkoutBranch(input.branchName, input.remoteBranch);
+    const localBranches = await git.branchLocal();
+    const branchAlreadyExists = localBranches.all.includes(input.branchName);
+    if (branchAlreadyExists) {
+      await git.checkout(input.branchName);
+      const slashIndex = input.remoteBranch.indexOf("/");
+      // Only pull when remoteBranch has the expected "remote/branch" format and
+      // the existing local branch is actually tracking this remote branch.
+      if (slashIndex !== -1) {
+        const upstream = (
+          await git.raw([
+            "for-each-ref",
+            "--format=%(upstream:short)",
+            `refs/heads/${input.branchName}`
+          ])
+        ).trim();
+        if (upstream === input.remoteBranch) {
+          const remote = input.remoteBranch.slice(0, slashIndex);
+          const remoteBranchName = input.remoteBranch.slice(slashIndex + 1);
+          await git.pull(remote, remoteBranchName);
+        }
+      }
+    } else {
+      await git.checkoutBranch(input.branchName, input.remoteBranch);
+    }
   }
 }
