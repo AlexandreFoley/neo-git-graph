@@ -30,12 +30,9 @@ export async function checkoutBranch(
   if (input.remoteBranch === null) {
     await git.checkout(input.branchName);
   } else {
-    try {
-      await git.checkoutBranch(input.branchName, input.remoteBranch);
-    } catch (e) {
-      if (!(e instanceof Error) || !e.message.includes("already exists")) {
-        throw e;
-      }
+    const localBranches = await git.branchLocal();
+    const branchAlreadyExists = localBranches.all.includes(input.branchName);
+    if (branchAlreadyExists) {
       await git.checkout(input.branchName);
       const slashIndex = input.remoteBranch.indexOf("/");
       // Only pull when remoteBranch has the expected "remote/branch" format.
@@ -46,6 +43,8 @@ export async function checkoutBranch(
         const remoteBranchName = input.remoteBranch.slice(slashIndex + 1);
         await git.pull(remote, remoteBranchName);
       }
+    } else {
+      await git.checkoutBranch(input.branchName, input.remoteBranch);
     }
   }
 }
