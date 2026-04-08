@@ -23,6 +23,8 @@ beforeAll(() => {
   remoteRepo = makeRepo();
   git(["remote", "add", "origin", remoteRepo], repo);
   git(["fetch", "origin"], repo);
+  // Set up main to track origin/main so the pull test works as expected.
+  git(["branch", "--set-upstream-to=origin/main", "main"], repo);
 });
 
 afterAll(() => {
@@ -73,6 +75,33 @@ describe("checkoutBranch", () => {
       remoteBranch: "main"
     });
     expect(currentBranch(repo)).toBe("other");
+
+    git(["checkout", "main"], repo);
+  });
+
+  it("does not pull when existing local branch does not track the given remote branch", async () => {
+    fs.writeFileSync(path.join(remoteRepo, "f"), "unrelated update");
+    git(["add", "."], remoteRepo);
+    git(["commit", "-m", "remote commit for unrelated branch test"], remoteRepo);
+    git(["fetch", "origin"], repo);
+
+    const commitBefore = cp
+      .execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo })
+      .toString()
+      .trim();
+
+    // "other" exists locally but does not track "origin/main"
+    await checkoutBranch(simpleGit(repo), {
+      branchName: "other",
+      remoteBranch: "origin/main"
+    });
+    expect(currentBranch(repo)).toBe("other");
+
+    const commitAfter = cp
+      .execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo })
+      .toString()
+      .trim();
+    expect(commitAfter).toBe(commitBefore);
 
     git(["checkout", "main"], repo);
   });
