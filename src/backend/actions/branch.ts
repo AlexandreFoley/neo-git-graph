@@ -30,6 +30,22 @@ export async function checkoutBranch(
   if (input.remoteBranch === null) {
     await git.checkout(input.branchName);
   } else {
-    await git.checkoutBranch(input.branchName, input.remoteBranch);
+    try {
+      await git.checkoutBranch(input.branchName, input.remoteBranch);
+    } catch (e) {
+      if (!(e instanceof Error) || !e.message.includes("already exists")) {
+        throw e;
+      }
+      await git.checkout(input.branchName);
+      const slashIndex = input.remoteBranch.indexOf("/");
+      // Only pull when remoteBranch has the expected "remote/branch" format.
+      // From the UI, remoteBranch is always a remote-tracking ref (e.g. "origin/main"),
+      // so this guard handles any unexpected non-remote start points gracefully.
+      if (slashIndex !== -1) {
+        const remote = input.remoteBranch.slice(0, slashIndex);
+        const remoteBranchName = input.remoteBranch.slice(slashIndex + 1);
+        await git.pull(remote, remoteBranchName);
+      }
+    }
   }
 }
